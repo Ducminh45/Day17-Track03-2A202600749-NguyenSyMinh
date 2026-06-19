@@ -56,6 +56,11 @@ def extract_profile_updates(message: str) -> dict[str, str]:
     """Student TODO: convert raw user text into stable profile facts."""
     updates = {}
     
+    # BONUS: Confidence threshold / Guardrail
+    # Tránh lưu thông tin sai khi người dùng đang đặt câu hỏi thay vì cung cấp fact
+    if "?" in message or "có phải" in message.lower():
+        return updates
+    
     # Heuristic extraction for offline benchmarks
     msg_lower = message.lower()
     
