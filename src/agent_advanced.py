@@ -34,6 +34,8 @@ class AdvancedAgent:
 
     def reply(self, user_id: str, thread_id: str, message: str) -> dict[str, Any]:
         """Student TODO: route between offline mode and live mode."""
+        if not self.force_offline and self.langchain_agent:
+            return self._reply_online(user_id, thread_id, message)
         return self._reply_offline(user_id, thread_id, message)
 
     def token_usage(self, thread_id: str) -> int:
@@ -140,6 +142,74 @@ class AdvancedAgent:
                 return "Style của bạn là 3 bullet, ví dụ thực chiến, nhấn trade-off."
                 
         return "Đã nhận thông tin vào User profile và compact memory."
+
+    def _reply_online(self, user_id: str, thread_id: str, message: str) -> dict[str, Any]:
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+        
+        if thread_id not in self.thread_tokens:
+            self.thread_tokens[thread_id] = 0
+            self.thread_prompt_tokens[thread_id] = 0
+            
+        # 1. Profile Extraction (heuristic for safety in benchmark, but handles online flow)
+        updates = extract_profile_updates(message)
+        if updates:
+            content = self.profile_store.read_text(user_id)
+            lines = content.splitlines() if content else []
+            for k, v in updates.items():
+                found = False
+                for i, line in enumerate(lines):
+                    if line.startswith(f"{k}:"):
+                        lines[i] = f"{k}: {v}"
+                        found = True
+                        break
+                if not found:
+                    lines.append(f"{k}: {v}")
+            self.profile_store.write_text(user_id, "\n".join(lines))
+            
+        # 2. Prepare Context
+        user_md = self.profile_store.read_text(user_id)
+        ctx = self.compact_memory.context(thread_id)
+        
+        sys_prompt = "You are a helpful AI assistant."
+        if user_md:
+            sys_prompt += f"\n\nHere is what you know about the user:\n{user_md}"
+        if ctx["summary"]:
+            sys_prompt += f"\n\nSummary of past conversation in this thread:\n{ctx['summary']}"
+            
+        langchain_msgs = [SystemMessage(content=sys_prompt)]
+        for m in ctx["messages"]:
+            if m["role"] == "user":
+                langchain_msgs.append(HumanMessage(content=m["content"]))
+            else:
+                langchain_msgs.append(AIMessage(content=m["content"]))
+                
+        langchain_msgs.append(HumanMessage(content=message))
+        
+        # 3. Call LLM
+        response = self.langchain_agent.invoke(langchain_msgs)
+        response_text = str(response.content)
+        
+        # 4. Token Accounting
+        usage = getattr(response, "usage_metadata", {})
+        if usage:
+            prompt_tokens = usage.get("input_tokens", 0)
+            out_tokens = usage.get("output_tokens", 0)
+        else:
+            prompt_tokens = self._estimate_prompt_context_tokens(user_id, thread_id) + estimate_tokens(message)
+            out_tokens = estimate_tokens(response_text)
+            
+        self.thread_prompt_tokens[thread_id] += prompt_tokens
+        self.thread_tokens[thread_id] += (prompt_tokens + out_tokens)
+        
+        # 5. Append Memory
+        self.compact_memory.append(thread_id, "user", message)
+        self.compact_memory.append(thread_id, "assistant", response_text)
+        
+        return {
+            "response": response_text,
+            "token_usage": self.thread_tokens[thread_id],
+            "prompt_tokens_processed": self.thread_prompt_tokens[thread_id]
+        }
 
     def _maybe_build_langchain_agent(self):
         """Student TODO: wire a live agent with tools and compact middleware."""

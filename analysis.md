@@ -24,3 +24,8 @@ Trong các benchmark dài, chúng ta thấy cột `Memory growth (bytes)` tăng 
 Để giành điểm xuất sắc (90-100) theo rubric, repo này đã áp dụng các kỹ thuật sau:
 1. **Conflict Handling (Ghi đè - Overwrite)**: Thay vì lưu tất cả các thay đổi theo kiểu nhật ký (append-only), cấu trúc của `UserProfileStore` quét qua file markdown bằng regex và cập nhật trực tiếp key tương ứng (như `location: Đà Nẵng` sẽ đè lên `location: Huế`).
 2. **Confidence Threshold Guardrail**: Được cấu hình tại `extract_profile_updates` trong `memory_store.py`. Nếu một message từ người dùng kết thúc bằng dấu chấm hỏi `?` hoặc chứa từ để hỏi `có phải`, hệ thống sẽ từ chối extract fact. Guardrail này bảo vệ persistent memory khỏi việc bị ô nhiễm (polluted) khi người dùng đổi ý hoặc kiểm tra ngược lại mô hình.
+
+## 5. So sánh Offline vs Online Mode (Live LLM API)
+Mặc định hệ thống được thiết kế chạy Offline cho mục đích benchmark nhằm đảm bảo tính tái lập (deterministic) và không tốn tiền API. Tuy nhiên, hệ thống đã được cập nhật logic để hỗ trợ đầy đủ chế độ Online (như OpenAI/Gemini/Anthropic):
+- **Offline Mode**: Trả lời bằng các câu lệnh cố định. Ưu điểm là miễn phí và phản hồi ngay lập tức, nhưng rập khuôn và bị giới hạn cứng.
+- **Online Mode (Live API)**: Được trang bị trong `_reply_online`. Ở đây, cấu trúc nén bộ nhớ và việc chèn `User.md` vào `SystemMessage` phát huy tác dụng lớn nhất vì nó giảm tải **hàng ngàn input tokens** mỗi lượt gọi LLM, trực tiếp **tiết kiệm tiền (USD)** thay vì chỉ là con số trong benchmark. Hơn nữa, với mô hình LLM thực sự, tính tự nhiên trong đàm thoại liên tục (multi-turn cross-session) là hoàn hảo và không bị rập khuôn.

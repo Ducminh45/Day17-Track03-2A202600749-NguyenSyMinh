@@ -35,6 +35,8 @@ class BaselineAgent:
 
     def reply(self, user_id: str, thread_id: str, message: str) -> dict[str, Any]:
         """Student TODO: return the agent response and token accounting."""
+        if not self.force_offline and self.langchain_agent:
+            return self._reply_online(thread_id, message)
         return self._reply_offline(thread_id, message)
 
     def token_usage(self, thread_id: str) -> int:
@@ -106,6 +108,52 @@ class BaselineAgent:
                 return "Bạn ở Huế."
                 
         return "Ghi nhận thông tin."
+
+    def _reply_online(self, thread_id: str, message: str) -> dict[str, Any]:
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+        
+        if thread_id not in self.sessions:
+            self.sessions[thread_id] = SessionState()
+            
+        state = self.sessions[thread_id]
+        
+        # Build prompt
+        langchain_msgs = [SystemMessage(content="You are a helpful assistant. Please answer concisely.")]
+        for m in state.messages:
+            if m["role"] == "user":
+                langchain_msgs.append(HumanMessage(content=m["content"]))
+            else:
+                langchain_msgs.append(AIMessage(content=m["content"]))
+                
+        langchain_msgs.append(HumanMessage(content=message))
+        
+        # Invoke LLM
+        response = self.langchain_agent.invoke(langchain_msgs)
+        response_text = str(response.content)
+        
+        # Update token usage from LLM metadata if available, otherwise estimate
+        usage = getattr(response, "usage_metadata", {})
+        if usage:
+            prompt_tokens = usage.get("input_tokens", 0)
+            out_tokens = usage.get("output_tokens", 0)
+        else:
+            prompt_tokens = estimate_tokens(message)
+            for m in state.messages:
+                prompt_tokens += estimate_tokens(m["content"])
+            out_tokens = estimate_tokens(response_text)
+            
+        state.prompt_tokens_processed += prompt_tokens
+        state.token_usage += (prompt_tokens + out_tokens)
+        
+        # Append to history
+        state.messages.append({"role": "user", "content": message})
+        state.messages.append({"role": "assistant", "content": response_text})
+        
+        return {
+            "response": response_text,
+            "token_usage": state.token_usage,
+            "prompt_tokens_processed": state.prompt_tokens_processed
+        }
 
     def _maybe_build_langchain_agent(self):
         """Student TODO: optionally wire `create_agent` + `InMemorySaver` here."""
