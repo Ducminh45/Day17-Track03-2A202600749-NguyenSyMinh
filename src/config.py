@@ -33,7 +33,17 @@ def load_config(base_dir: Path | None = None) -> LabConfig:
     data_dir = root / "data"
 
     provider_name = os.getenv("LLM_PROVIDER", "custom").lower()
-    model_name = os.getenv("LLM_MODEL", "offline-mock")
+    
+    # Set a smart default model if not provided
+    default_model = "offline-mock"
+    if provider_name == "openai":
+        default_model = "gpt-4o-mini"
+    elif provider_name == "gemini":
+        default_model = "gemini-1.5-flash"
+    elif provider_name == "anthropic":
+        default_model = "claude-3-haiku-20240307"
+        
+    model_name = os.getenv("LLM_MODEL", default_model)
     
     api_key = None
     base_url = None
